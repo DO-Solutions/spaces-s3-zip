@@ -1,6 +1,7 @@
-const { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
-const archiver = require('archiver');
-const { Readable, PassThrough } = require('stream');
+import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+import archiver from 'archiver';
+import { Readable, PassThrough } from 'stream';
 
 /**
  * DigitalOcean Function to backup a Spaces bucket to another bucket
@@ -144,83 +145,109 @@ async function listAllObjects(client, bucket) {
  * Uses streaming to handle large files efficiently
  */
 async function createAndUploadArchive(sourceClient, destClient, sourceBucket, destBucket, objects, archiveName) {
-  return new Promise(async (resolve, reject) => {
-    // Create a pass-through stream for the upload
-    const passThrough = new PassThrough();
+  // Create a pass-through stream for the upload
+  const passThrough = new PassThrough();
 
-    // Create the archiver
-    const archive = archiver('zip', {
-      zlib: { level: 6 } // Compression level (0-9)
+  // Create the archiver
+  const archive = archiver('zip', {
+    zlib: { level: 6 } // Compression level (0-9)
+  });
+
+  let totalSize = 0;
+  let archiveSize = 0;
+
+  // Track upload progress
+  archive.on('progress', (progress) => {
+    console.log(`Archive progress: ${progress.entries.processed}/${progress.entries.total} files`);
+  });
+
+  // Track when archive finishes writing
+  const archiveEndPromise = new Promise((resolveEnd, rejectEnd) => {
+    archive.on('end', () => {
+      archiveSize = archive.pointer();
+      console.log(`Archive finished writing. Total size: ${archiveSize} bytes`);
+      resolveEnd();
     });
+    archive.on('error', rejectEnd);
+  });
 
-    let totalSize = 0;
+  // Handle pass-through stream errors
+  const passThroughErrorPromise = new Promise((_, rejectError) => {
+    passThrough.on('error', rejectError);
+  });
 
-    // Track upload progress
-    archive.on('progress', (progress) => {
-      console.log(`Archive progress: ${progress.entries.processed}/${progress.entries.total} files`);
-    });
+  // Pipe the archive to the pass-through stream
+  archive.pipe(passThrough);
 
-    // Handle archiver errors
-    archive.on('error', (err) => {
-      reject(err);
-    });
-
-    // Pipe the archive to the pass-through stream
-    archive.pipe(passThrough);
-
-    // Start the upload to destination bucket
-    const uploadPromise = destClient.send(new PutObjectCommand({
+  // Start the upload to destination bucket using Upload for streaming
+  const upload = new Upload({
+    client: destClient,
+    params: {
       Bucket: destBucket,
       Key: archiveName,
       Body: passThrough,
       ContentType: 'application/zip'
-    }));
-
-    // Add files to archive
-    try {
-      for (const obj of objects) {
-        console.log(`Adding to archive: ${obj.Key}`);
-
-        // Get the object from source bucket
-        const getCommand = new GetObjectCommand({
-          Bucket: sourceBucket,
-          Key: obj.Key
-        });
-
-        const response = await sourceClient.send(getCommand);
-
-        // Convert the response body to a readable stream if it isn't already
-        let stream;
-        if (response.Body instanceof Readable) {
-          stream = response.Body;
-        } else {
-          stream = Readable.from(response.Body);
-        }
-
-        // Add the file to the archive
-        archive.append(stream, { name: obj.Key });
-        totalSize += obj.Size || 0;
-      }
-
-      // Finalize the archive
-      console.log('Finalizing archive...');
-      await archive.finalize();
-
-      // Wait for upload to complete
-      await uploadPromise;
-
-      console.log('Upload completed');
-      resolve({
-        success: true,
-        size: totalSize,
-        archiveSize: archive.pointer()
-      });
-
-    } catch (error) {
-      archive.destroy();
-      reject(error);
     }
   });
+
+  // Track upload progress
+  upload.on('httpUploadProgress', (progress) => {
+    if (progress.total) {
+      console.log(`Upload progress: ${Math.round((progress.loaded / progress.total) * 100)}%`);
+    }
+  });
+
+  const uploadPromise = upload.done();
+
+  // Add files to archive
+  try {
+    for (const obj of objects) {
+      console.log(`Adding to archive: ${obj.Key}`);
+
+      // Get the object from source bucket
+      const getCommand = new GetObjectCommand({
+        Bucket: sourceBucket,
+        Key: obj.Key
+      });
+
+      const response = await sourceClient.send(getCommand);
+
+      // Convert the response body to a readable stream if it isn't already
+      let stream;
+      if (response.Body instanceof Readable) {
+        stream = response.Body;
+      } else {
+        stream = Readable.from(response.Body);
+      }
+
+      // Add the file to the archive
+      archive.append(stream, { name: obj.Key });
+      totalSize += obj.Size || 0;
+    }
+
+    // Finalize the archive - this will trigger the 'end' event when done
+    console.log('Finalizing archive...');
+    await archive.finalize();
+
+    // Wait for the archive to finish writing all data and upload to complete
+    // Use Promise.race to catch any errors from passThrough stream
+    await Promise.race([
+      Promise.all([archiveEndPromise, uploadPromise]),
+      passThroughErrorPromise
+    ]);
+
+    console.log('Upload completed');
+    return {
+      success: true,
+      size: totalSize,
+      archiveSize: archiveSize
+    };
+
+  } catch (error) {
+    archive.destroy();
+    passThrough.destroy();
+    throw error;
+  }
 }
 
-module.exports.main = main;
+export { main };
