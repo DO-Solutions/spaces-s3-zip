@@ -27,12 +27,6 @@ A DigitalOcean Function that backs up the complete contents of a DigitalOcean Sp
 # macOS
 brew install doctl
 
-# Linux
-cd ~
-wget https://github.com/digitalocean/doctl/releases/download/v1.98.0/doctl-1.98.0-linux-amd64.tar.gz
-tar xf ~/doctl-1.98.0-linux-amd64.tar.gz
-sudo mv ~/doctl /usr/local/bin
-
 # Authenticate
 doctl auth init
 ```
@@ -51,26 +45,7 @@ Copy the example environment file and fill in your values:
 cp .env.example .env
 ```
 
-Edit `.env` with your configuration:
-
-```env
-# Source bucket (the bucket you want to backup)
-SOURCE_BUCKET=my-source-bucket
-SOURCE_REGION=nyc3
-SOURCE_ENDPOINT=https://nyc3.digitaloceanspaces.com
-
-# Destination bucket (where the backup archive will be stored)
-DEST_BUCKET=my-backup-bucket
-DEST_REGION=nyc3
-DEST_ENDPOINT=https://nyc3.digitaloceanspaces.com
-
-# Your Spaces credentials
-SPACES_KEY=your-spaces-access-key
-SPACES_SECRET=your-spaces-secret-key
-
-# Archive prefix (optional)
-ARCHIVE_PREFIX=backups
-```
+Edit `.env` with your configuration
 
 ### 4. Install Dependencies
 
@@ -88,7 +63,7 @@ doctl serverless deploy .
 
 The function will be available at a URL like:
 ```
-https://faas-nyc1-2ef2e6cc.doserverless.co/api/v1/web/fn-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/backup/backup
+https://faas-nyc1-x.doserverless.co/api/v1/web/fn-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/backup/backup
 ```
 
 ## Usage
@@ -163,15 +138,6 @@ Error response:
 | `SPACES_SECRET` | Yes | - | Spaces secret access key |
 | `ARCHIVE_PREFIX` | No | `backups` | Prefix/folder for backup archives |
 
-### Available Regions
-
-- `nyc3` - New York 3
-- `sfo3` - San Francisco 3
-- `ams3` - Amsterdam 3
-- `sgp1` - Singapore 1
-- `fra1` - Frankfurt 1
-- `syd1` - Sydney 1
-
 ### Function Limits
 
 Configured in `project.yml`:
@@ -182,10 +148,10 @@ Adjust these if needed for larger buckets.
 
 ## How It Works
 
-1. **List Objects**: The function retrieves a complete list of all objects in the source bucket, handling pagination automatically
-2. **Create Archive**: Uses the `archiver` library to create a ZIP archive
-3. **Stream Download**: Each object is streamed from the source bucket
-4. **Stream Upload**: The archive is simultaneously streamed to the destination bucket
+1. **List Objects**: The function retrieves a complete list of all objects in the source bucket using `@aws-sdk/client-s3`, handling pagination automatically
+2. **Create Archive**: Uses the `archiver` library (v7) to create a streaming ZIP archive
+3. **Stream Download**: Each object is streamed from the source bucket using the AWS SDK v3 `GetObjectCommand`
+4. **Stream Upload**: The archive is simultaneously streamed to the destination bucket using `@aws-sdk/lib-storage` for efficient multipart uploads
 5. **Complete**: Returns a summary with file count, size, and duration
 
 ## Limitations
@@ -197,49 +163,15 @@ Adjust these if needed for larger buckets.
   - Using a DigitalOcean Droplet instead
 - **Bandwidth**: Subject to DigitalOcean bandwidth limits
 
+## Dependencies
+
+The function uses the following key libraries:
+
+- **[@aws-sdk/client-s3](https://www.npmjs.com/package/@aws-sdk/client-s3)** (v3) - S3-compatible operations for DigitalOcean Spaces
+- **[@aws-sdk/lib-storage](https://www.npmjs.com/package/@aws-sdk/lib-storage)** (v3) - Managed multipart uploads with streaming support
+- **[archiver](https://www.npmjs.com/package/archiver)** (v7) - Streaming ZIP archive creation
+
 ## Troubleshooting
-
-### Function Times Out
-
-Increase the timeout in `project.yml`:
-```yaml
-limits:
-  timeout: 1800000  # 30 minutes
-  memory: 2048      # 2GB RAM
-```
-
-### Out of Memory
-
-Either:
-- Increase memory allocation in `project.yml`
-- Reduce compression level in `packages/backup/backup/backup.js`:
-  ```javascript
-  zlib: { level: 1 } // Faster, less compression
-  ```
-
-### Missing Environment Variables
-
-Ensure all required variables are set in `.env` and redeploy:
-```bash
-doctl serverless deploy .
-```
-
-## Development
-
-### Local Testing
-
-You can test the function locally by running it with Node.js:
-
-```bash
-# Set environment variables
-export SOURCE_BUCKET=my-source-bucket
-export DEST_BUCKET=my-backup-bucket
-export SPACES_KEY=your-key
-export SPACES_SECRET=your-secret
-
-# Run the function
-node -e "require('./packages/backup/backup/backup.js').main({})"
-```
 
 ### View Logs
 
@@ -256,4 +188,6 @@ MIT
 
 - [DigitalOcean Functions Documentation](https://docs.digitalocean.com/products/functions/)
 - [DigitalOcean Spaces Documentation](https://docs.digitalocean.com/products/spaces/)
-- [AWS SDK for JavaScript v3](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/)
+- [AWS SDK for JavaScript v3 - Client S3](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/client/s3/)
+- [AWS SDK for JavaScript v3 - Lib Storage](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/Package/-aws-sdk-lib-storage/)
+- [Archiver Documentation](https://www.archiverjs.com/)
