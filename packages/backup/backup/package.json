@@ -1,0 +1,13 @@
+{
+  "name": "backup-function",
+  "version": "1.0.0",
+  "description": "DigitalOcean Function to backup Spaces bucket",
+  "type": "module",
+  "main": "backup.js",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.700.0",
+    "@aws-sdk/lib-storage": "^3.700.0",
+    "archiver": "^7.0.1"
+  }
+}
+

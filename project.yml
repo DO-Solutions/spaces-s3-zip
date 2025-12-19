@@ -1,0 +1,18 @@
+packages:
+  - name: backup
+    environment:
+      SOURCE_BUCKET: ${SOURCE_BUCKET}
+      SOURCE_REGION: ${SOURCE_REGION}
+      SOURCE_ENDPOINT: ${SOURCE_ENDPOINT}
+      DEST_BUCKET: ${DEST_BUCKET}
+      DEST_REGION: ${DEST_REGION}
+      DEST_ENDPOINT: ${DEST_ENDPOINT}
+      SPACES_KEY: ${SPACES_KEY}
+      SPACES_SECRET: ${SPACES_SECRET}
+      ARCHIVE_PREFIX: ${ARCHIVE_PREFIX}
+    functions:
+      - name: backup
+        runtime: nodejs:18
+        limits:
+          timeout: 900000  # 15 minutes
+          memory: 1024     # 1GB RAM
