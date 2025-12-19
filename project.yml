@@ -12,7 +12,7 @@ packages:
       ARCHIVE_PREFIX: ${ARCHIVE_PREFIX}
     functions:
       - name: backup
-        runtime: nodejs:20
+        runtime: nodejs:18
         limits:
           timeout: 900000  # 15 minutes
           memory: 1024     # 1GB RAM
